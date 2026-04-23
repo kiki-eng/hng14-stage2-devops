@@ -82,16 +82,35 @@ jobs:
       - name: Start services
         run: docker compose up -d
 
-      - name: Wait for API
+      - name: Wait for frontend
         run: |
-          echo "Waiting for API..."
-          for i in {1..10}; do
-            curl -s http://localhost:8000/health && break
+          for i in {1..20}; do
+            curl -fsS http://localhost:3000/health && exit 0
             sleep 3
           done
+          echo "Frontend did not become ready in time"
+          docker compose logs
+          exit 1
 
-      - name: Submit job
-        run: curl -X POST http://localhost:8000/jobs
+      - name: Submit job through frontend
+        run: |
+          JOB_ID=$(curl -fsS -X POST http://localhost:3000/submit | python3 -c "import sys, json; print(json.load(sys.stdin)['job_id'])")
+          echo "JOB_ID=$JOB_ID" >> $GITHUB_ENV
+          echo "Submitted job: $JOB_ID"
+
+      - name: Poll job status until completed
+        run: |
+          for i in {1..20}; do
+            STATUS=$(curl -fsS http://localhost:3000/status/${JOB_ID} | python3 -c "import sys, json; print(json.load(sys.stdin)['status'])")
+            echo "Current status: $STATUS"
+            if [ "$STATUS" = "completed" ]; then
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Job did not complete in time"
+          docker compose logs
+          exit 1
 
       - name: Stop services
         if: always()
