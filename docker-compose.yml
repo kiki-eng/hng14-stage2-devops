@@ -1,8 +1,7 @@
-
-
 services:
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     networks:
       - internal
     healthcheck:
@@ -20,6 +19,7 @@ services:
     build:
       context: ./api
       dockerfile: Dockerfile
+    restart: unless-stopped
     environment:
       REDIS_HOST: ${REDIS_HOST}
       REDIS_PORT: ${REDIS_PORT}
@@ -44,6 +44,7 @@ services:
     build:
       context: ./worker
       dockerfile: Dockerfile
+    restart: unless-stopped
     environment:
       REDIS_HOST: ${REDIS_HOST}
       REDIS_PORT: ${REDIS_PORT}
@@ -70,6 +71,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    restart: unless-stopped
     environment:
       API_URL: ${API_URL}
       PORT: ${PORT}

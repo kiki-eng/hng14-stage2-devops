@@ -12,46 +12,123 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Install Python deps
         run: pip install flake8
 
-      - name: Lint Python
+      - name: Run flake8 on Python code
         run: flake8 api worker
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install frontend deps
+        run: npm install
+        working-directory: frontend
+
+      - name: Run ESLint on frontend
+        run: npx eslint .
+        working-directory: frontend
+
+      - name: Install Hadolint
+        run: |
+          wget -qO /usr/local/bin/hadolint https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64
+          chmod +x /usr/local/bin/hadolint
+
+      - name: Lint Dockerfiles with Hadolint
+        run: |
+          hadolint api/Dockerfile
+          hadolint worker/Dockerfile
+          hadolint frontend/Dockerfile
 
   test:
     runs-on: ubuntu-latest
     needs: lint
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Install Python deps
         run: pip install -r api/requirements.txt
 
-      - name: Run basic test
-        run: echo "Tests passed"
+      - name: Run pytest with coverage
+        run: pytest tests/ --cov=api --cov-report=xml:coverage.xml --cov-report=term -v
+        env:
+          PYTHONPATH: api
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
 
   build:
     runs-on: ubuntu-latest
     needs: test
 
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Create env file
         run: cp .env.example .env
 
-      - name: Build Docker images
-        run: docker compose build
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+
+      - name: Build API image with cache and tags
+        uses: docker/build-push-action@v5
+        with:
+          context: ./api
+          push: true
+          tags: |
+            localhost:5000/api:${{ github.sha }}
+            localhost:5000/api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Worker image with cache and tags
+        uses: docker/build-push-action@v5
+        with:
+          context: ./worker
+          push: true
+          tags: |
+            localhost:5000/worker:${{ github.sha }}
+            localhost:5000/worker:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Frontend image with cache and tags
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            localhost:5000/frontend:${{ github.sha }}
+            localhost:5000/frontend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   security:
     runs-on: ubuntu-latest
     needs: build
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Create env file
         run: cp .env.example .env
@@ -67,20 +144,28 @@ jobs:
           sudo dpkg -i trivy_0.70.0_Linux-64bit.deb
 
       - name: Scan API image
-        run: trivy image --exit-code 0 hng14-stage2-devops-api
+        run: trivy image --exit-code 1 --severity CRITICAL --format sarif --output api-trivy.sarif hng14-stage2-devops-api
 
-      - name: Scan worker image
-        run: trivy image --exit-code 0 hng14-stage2-devops-worker
+      - name: Scan Worker image
+        run: trivy image --exit-code 1 --severity CRITICAL --format sarif --output worker-trivy.sarif hng14-stage2-devops-worker
 
-      - name: Scan frontend image
-        run: trivy image --exit-code 0 hng14-stage2-devops-frontend
+      - name: Scan Frontend image
+        run: trivy image --exit-code 1 --severity CRITICAL --format sarif --output frontend-trivy.sarif hng14-stage2-devops-frontend
+
+      - name: Upload Trivy SARIF artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-sarif-reports
+          path: "*.sarif"
 
   integration:
     runs-on: ubuntu-latest
     needs: security
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Create env file
         run: cp .env.example .env
@@ -88,43 +173,14 @@ jobs:
       - name: Build images
         run: docker compose build
 
-      - name: Start services
-        run: docker compose up -d
-
-      - name: Wait for frontend
-        run: |
-          for i in {1..20}; do
-            curl -fsS http://localhost:3000/health && exit 0
-            sleep 3
-          done
-          echo "Frontend did not become ready in time"
-          docker compose logs
-          exit 1
-
-      - name: Submit job through frontend
-        run: |
-          JOB_ID=$(curl -fsS -X POST http://localhost:3000/submit | python3 -c "import sys, json; print(json.load(sys.stdin)['job_id'])")
-          echo "JOB_ID=$JOB_ID" >> $GITHUB_ENV
-          echo "Submitted job: $JOB_ID"
-
-      - name: Poll job status until completed
-        run: |
-          for i in {1..20}; do
-            STATUS=$(curl -fsS http://localhost:3000/status/${JOB_ID} | python3 -c "import sys, json; print(json.load(sys.stdin)['status'])")
-            echo "Current status: $STATUS"
-            if [ "$STATUS" = "completed" ]; then
-              exit 0
-            fi
-            sleep 3
-          done
-          echo "Job did not complete in time"
-          docker compose logs
-          exit 1
+      - name: Run integration tests
+        run: bash integration.sh
+        env:
+          TIMEOUT: 120
 
       - name: Stop services
         if: always()
         run: docker compose down
-
 
   deploy:
     runs-on: ubuntu-latest
@@ -132,7 +188,8 @@ jobs:
     if: github.ref == 'refs/heads/main'
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Create env file
         run: cp .env.example .env
@@ -156,13 +213,13 @@ jobs:
       - name: Rolling update simulation
         run: docker compose up -d --build
 
-      - name: Verify new frontend health within 60 seconds
+      - name: Verify updated stack health
         run: |
           for i in {1..20}; do
             curl -fsS http://localhost:3000/health && exit 0
             sleep 3
           done
-          echo "Updated stack failed health check within 60 seconds"
+          echo "Updated stack failed health check"
           docker compose logs
           exit 1
 

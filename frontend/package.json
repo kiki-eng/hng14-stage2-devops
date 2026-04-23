@@ -3,10 +3,14 @@
   "version": "1.0.0",
   "main": "app.js",
   "scripts": {
-    "start": "node app.js"
+    "start": "node app.js",
+    "lint": "eslint ."
   },
   "dependencies": {
     "express": "^4.18.2",
     "axios": "^1.4.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0"
   }
 }
