@@ -124,11 +124,45 @@ jobs:
       - name: Stop services
         if: always()
         run: docker compose down
+
+
   deploy:
     runs-on: ubuntu-latest
     needs: integration
     if: github.ref == 'refs/heads/main'
 
     steps:
-      - name: Deploy placeholder
-        run: echo "Deploy step (can be extended)"
+      - uses: actions/checkout@v4
+
+      - name: Build images
+        run: docker compose build
+
+      - name: Start current stack
+        run: docker compose up -d
+
+      - name: Wait for current frontend health
+        run: |
+          for i in {1..20}; do
+            curl -fsS http://localhost:3000/health && exit 0
+            sleep 3
+          done
+          echo "Current stack failed health check"
+          docker compose logs
+          exit 1
+
+      - name: Rolling update simulation
+        run: docker compose up -d --build
+
+      - name: Verify new frontend health within 60 seconds
+        run: |
+          for i in {1..20}; do
+            curl -fsS http://localhost:3000/health && exit 0
+            sleep 3
+          done
+          echo "Updated stack failed health check within 60 seconds"
+          docker compose logs
+          exit 1
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down
