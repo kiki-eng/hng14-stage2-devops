@@ -41,3 +41,33 @@
 - Line: Redis client usage
 - Problem: Services assumed Redis would always be available immediately.
 - Fix: Add environment-based configuration and structure the services so they work correctly with Docker health-checked startup ordering.
+
+## 8. Frontend not prepared for container health checks
+- File: frontend/app.js
+- Line: route definitions
+- Problem: Frontend had no health endpoint for container monitoring.
+- Fix: Added `/health` route and used it for Docker HEALTHCHECK.
+
+## 9. Frontend bound only to default host behavior
+- File: frontend/app.js
+- Line: app.listen
+- Problem: Frontend did not explicitly listen on `0.0.0.0`, which can cause in-container accessibility problems.
+- Fix: Updated the frontend to listen on `0.0.0.0`.
+
+## 10. Missing container definitions
+- File: frontend/Dockerfile, api/Dockerfile, worker/Dockerfile
+- Line: entire files
+- Problem: No Dockerfiles existed for production containerization.
+- Fix: Added production-oriented Dockerfiles for all three services with non-root users and HEALTHCHECK instructions.
+
+## 11. Verified end-to-end job flow after containerization
+- File: docker-compose.yml and service configuration
+- Line: overall runtime behavior
+- Problem: The application needed to be validated as a full multi-service workflow after containerization.
+- Fix: Confirmed that the frontend can submit a job, the API stores it in Redis, the worker processes it, and the final status updates to `completed`.
+
+## 12. Obsolete docker-compose version field
+- File: docker-compose.yml
+- Line: 1
+- Problem: The Compose file used the obsolete `version` field, which triggers warnings in modern Docker Compose.
+- Fix: Removed the `version` field and relied on the current Compose specification.

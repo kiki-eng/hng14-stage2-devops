@@ -1,0 +1,97 @@
+
+
+services:
+  redis:
+    image: redis:7-alpine
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    environment:
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      APP_ENV: ${APP_ENV}
+    networks:
+      - internal
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    environment:
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      APP_ENV: ${APP_ENV}
+    networks:
+      - internal
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "print('worker healthy')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      API_URL: ${API_URL}
+      PORT: ${PORT}
+      APP_ENV: ${APP_ENV}
+    ports:
+      - "${FRONTEND_PORT}:3000"
+    networks:
+      - internal
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+
+networks:
+  internal:
+    driver: bridge
