@@ -55,3 +55,14 @@ jobs:
           import requests
           print("Basic test placeholder")
           EOF
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker images
+        run: |
+          docker compose build
