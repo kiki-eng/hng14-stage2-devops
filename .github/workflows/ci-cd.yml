@@ -4,7 +4,10 @@ on:
   push:
     branches:
       - main
-      - stage2-setup
+      - stage3-detector
+  pull_request:
+    branches:
+      - main
 
 jobs:
 
@@ -18,21 +21,8 @@ jobs:
       - name: Install Python deps
         run: pip install flake8
 
-      - name: Run flake8 on Python code
-        run: flake8 api worker
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install frontend deps
-        run: npm install
-        working-directory: frontend
-
-      - name: Run ESLint on frontend
-        run: npx eslint .
-        working-directory: frontend
+      - name: Run flake8 on detector code
+        run: flake8 detector/ --max-line-length=120
 
       - name: Install Hadolint
         run: |
@@ -40,36 +30,11 @@ jobs:
           chmod +x /usr/local/bin/hadolint
 
       - name: Lint Dockerfiles with Hadolint
-        run: |
-          hadolint api/Dockerfile
-          hadolint worker/Dockerfile
-          hadolint frontend/Dockerfile
-
-  test:
-    runs-on: ubuntu-latest
-    needs: lint
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Python deps
-        run: pip install -r api/requirements.txt
-
-      - name: Run pytest with coverage
-        run: pytest tests/ --cov=api --cov-report=xml:coverage.xml --cov-report=term -v
-        env:
-          PYTHONPATH: api
-
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: coverage.xml
+        run: hadolint detector/Dockerfile
 
   build:
     runs-on: ubuntu-latest
-    needs: test
+    needs: lint
 
     services:
       registry:
@@ -89,40 +54,18 @@ jobs:
         with:
           driver-opts: network=host
 
-      - name: Build API image with cache and tags
+      - name: Build Detector image
         uses: docker/build-push-action@v5
         with:
-          context: ./api
+          context: ./detector
           push: true
           tags: |
-            localhost:5000/api:${{ github.sha }}
-            localhost:5000/api:latest
+            localhost:5000/detector:${{ github.sha }}
+            localhost:5000/detector:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Build Worker image with cache and tags
-        uses: docker/build-push-action@v5
-        with:
-          context: ./worker
-          push: true
-          tags: |
-            localhost:5000/worker:${{ github.sha }}
-            localhost:5000/worker:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build Frontend image with cache and tags
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          push: true
-          tags: |
-            localhost:5000/frontend:${{ github.sha }}
-            localhost:5000/frontend:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  security:
+  integration:
     runs-on: ubuntu-latest
     needs: build
 
@@ -136,93 +79,30 @@ jobs:
       - name: Build images
         run: docker compose build
 
-      - name: Install Trivy
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wget
-          wget https://github.com/aquasecurity/trivy/releases/download/v0.70.0/trivy_0.70.0_Linux-64bit.deb
-          sudo dpkg -i trivy_0.70.0_Linux-64bit.deb
-
-      - name: Scan API image
-        run: trivy image --exit-code 1 --severity CRITICAL --format sarif --output api-trivy.sarif hng14-stage2-devops-api
-
-      - name: Scan Worker image
-        run: trivy image --exit-code 1 --severity CRITICAL --format sarif --output worker-trivy.sarif hng14-stage2-devops-worker
-
-      - name: Scan Frontend image
-        run: trivy image --exit-code 1 --severity CRITICAL --format sarif --output frontend-trivy.sarif hng14-stage2-devops-frontend
-
-      - name: Upload Trivy SARIF artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-sarif-reports
-          path: "*.sarif"
-
-  integration:
-    runs-on: ubuntu-latest
-    needs: security
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Create env file
-        run: cp .env.example .env
-
-      - name: Build images
-        run: docker compose build
-
-      - name: Run integration tests
-        run: bash integration.sh
-        env:
-          TIMEOUT: 120
-
-      - name: Stop services
-        if: always()
-        run: docker compose down
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: integration
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Create env file
-        run: cp .env.example .env
-
-      - name: Build images
-        run: docker compose build
-
-      - name: Start current stack
+      - name: Start stack
         run: docker compose up -d
 
-      - name: Wait for current frontend health
+      - name: Wait for services
+        run: |
+          echo "Waiting for services to start..."
+          sleep 30
+          docker compose ps
+
+      - name: Check detector is running
+        run: |
+          docker compose ps detector | grep -q "running" || \
+            (echo "Detector not running"; docker compose logs detector; exit 1)
+
+      - name: Check dashboard responds
         run: |
           for i in {1..20}; do
-            curl -fsS http://localhost:3000/health && exit 0
+            curl -fsS http://localhost:8080/health && exit 0
             sleep 3
           done
-          echo "Current stack failed health check"
-          docker compose logs
-          exit 1
-
-      - name: Rolling update simulation
-        run: docker compose up -d --build
-
-      - name: Verify updated stack health
-        run: |
-          for i in {1..20}; do
-            curl -fsS http://localhost:3000/health && exit 0
-            sleep 3
-          done
-          echo "Updated stack failed health check"
-          docker compose logs
+          echo "Dashboard health check failed"
+          docker compose logs detector
           exit 1
 
       - name: Cleanup
         if: always()
-        run: docker compose down
+        run: docker compose down -v

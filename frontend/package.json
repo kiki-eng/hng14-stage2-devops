@@ -1,14 +1,18 @@
 {
-  "name": "frontend",
+  "name": "insighta-web-portal",
   "version": "1.0.0",
+  "description": "Web portal for Insighta Labs+ Profile Intelligence System",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
+    "dev": "node app.js",
     "lint": "eslint ."
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "axios": "^1.4.0"
+    "axios": "^1.7.0",
+    "cookie-parser": "^1.4.6",
+    "ejs": "^3.1.10",
+    "express": "^4.21.0"
   },
   "devDependencies": {
     "eslint": "^8.57.0"

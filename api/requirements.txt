@@ -1,7 +1,15 @@
 fastapi
-uvicorn
+uvicorn[standard]
+sqlalchemy
+psycopg2-binary
+python-jose[cryptography]
+httpx
+python-multipart
+slowapi
+pydantic[email]
+pydantic-settings
 redis
 pytest
 pytest-cov
-httpx
+pytest-asyncio
 fakeredis

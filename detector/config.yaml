@@ -1,0 +1,40 @@
+# Anomaly Detection Engine Configuration
+
+log_file: /var/log/nginx/hng-access.log
+audit_log_file: /var/log/detector/audit.log
+
+# Sliding window settings
+sliding_window_seconds: 60
+
+# Rolling baseline settings
+baseline_window_minutes: 30
+baseline_recalc_interval_seconds: 60
+baseline_min_samples: 30
+baseline_floor_mean: 2.0
+baseline_floor_stddev: 1.0
+
+# Anomaly detection thresholds
+zscore_threshold: 3.0
+rate_multiplier_threshold: 5.0
+error_surge_multiplier: 3.0
+error_tightened_zscore: 2.0
+error_tightened_rate_multiplier: 3.0
+
+# Blocking settings
+ban_backoff_minutes: [10, 30, 120]  # 10min, 30min, 2hr, then permanent
+block_action_timeout_seconds: 10
+
+# Whitelist IPs (never ban these)
+whitelist_ips: []
+
+# Slack notification settings
+slack_webhook_url: "${SLACK_WEBHOOK_URL}"
+slack_enabled: true
+
+# Dashboard settings
+dashboard_host: "0.0.0.0"
+dashboard_port: 8080
+dashboard_refresh_interval_seconds: 3
+
+# System metrics
+enable_system_metrics: true
